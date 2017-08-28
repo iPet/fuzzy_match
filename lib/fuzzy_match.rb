@@ -12,11 +12,11 @@ class FuzzyMatch
     def engine
       @engine
     end
-    
+
     def engine=(alt_engine)
       @engine = alt_engine
     end
-    
+
     def score_class
       case engine
       when :pure_ruby
@@ -28,9 +28,9 @@ class FuzzyMatch
       end
     end
   end
-  
+
   DEFAULT_ENGINE = :pure_ruby
-  
+
   #TODO refactor at least all the :find_X things
   DEFAULT_OPTIONS = {
     :must_match_grouping => false,
@@ -44,7 +44,7 @@ class FuzzyMatch
   }
 
   self.engine = DEFAULT_ENGINE
-  
+
   attr_reader :haystack
   attr_reader :groupings
   attr_reader :identities
@@ -73,7 +73,7 @@ class FuzzyMatch
     @groupings = (o.delete(:groupings) || o.delete(:blockings) || []).map { |regexp| Rule::Grouping.make(regexp) }.flatten
     @identities = (o.delete(:identities) || []).map { |regexp| Rule::Identity.new(regexp) }
     @stop_words = o.delete(:stop_words) || []
-    
+
     # options
     if deprecated = o.delete(:must_match_blocking)
       o[:must_match_grouping] = deprecated
@@ -82,11 +82,11 @@ class FuzzyMatch
 
     @haystack = haystack.map { |original| Record.new original, :stop_words => @stop_words, :read => @read }
   end
-    
+
   def last_result
     @last_result or raise("You can't access the last result until you've run a find with :gather_last_result => true")
   end
-  
+
   # Return everything in sorted order
   def find_all(needle, options = {})
     options = options.merge(:find_all => true)
@@ -110,10 +110,10 @@ class FuzzyMatch
     options = options.merge(:find_with_score => true)
     find needle, options
   end
-  
+
   def find(needle, options = {})
     options = default_options.merge options
-    
+
     threshold = options[:threshold]
     gather_last_result = options[:gather_last_result]
     is_find_all_with_score = options[:find_all_with_score]
@@ -122,27 +122,28 @@ class FuzzyMatch
     is_find_all = options[:find_all] || is_find_all_with_score || is_find_best
     must_match_grouping = options[:must_match_grouping]
     must_match_at_least_one_word = options[:must_match_at_least_one_word]
-    
+    must_match_at_least_half_a_word = options[:must_match_at_least_half_a_word]
+
     if gather_last_result
       @last_result = Result.new
       last_result.read = read
       last_result.haystack = haystack
       last_result.options = options
     end
-    
+
     if gather_last_result
       last_result.identities = identities
       last_result.groupings = groupings
       last_result.stop_words = stop_words
     end
-    
+
     needle = case needle
     when String
       Record.new needle, :stop_words => stop_words
     else
       Record.new needle, :read => read, :stop_words => stop_words
     end
-    
+
     if gather_last_result
       last_result.needle = needle
     end
@@ -180,6 +181,14 @@ EOS
       passed_grouping_requirement = haystack
     end
 
+    if must_match_at_least_half_a_word
+      passed_word_requirement = passed_grouping_requirement.select do |straw|
+        needle.words.grep(/#{straw.words.join("|")}/).any?
+      end
+    else
+      passed_word_requirement = passed_grouping_requirement
+    end
+
     if must_match_at_least_one_word
       passed_word_requirement = passed_grouping_requirement.select do |straw|
         (needle.words & straw.words).any?
@@ -195,12 +204,12 @@ EOS
     else
       passed_word_requirement = passed_grouping_requirement
     end
-        
+
     if first_grouping
       joint = passed_word_requirement.select do |straw|
         first_grouping.xjoin? needle, straw
       end
-      # binding.pry      
+      # binding.pry
       if gather_last_result
         last_result.timeline << <<-EOS
 Since there were groupings, the competition was reduced to #{joint.length} records in the same group as the needle.
@@ -210,7 +219,7 @@ EOS
     else
       joint = passed_word_requirement.dup
     end
-    
+
     if joint.none?
       if must_match_grouping
         if gather_last_result
@@ -227,7 +236,7 @@ EOS
         joint = passed_word_requirement.dup
       end
     end
-        
+
     if identities.any?
       possibly_identical = joint.select do |straw|
         identities.all? do |identity|
@@ -246,16 +255,16 @@ EOS
     else
       possibly_identical = joint.dup
     end
-    
+
     similarities = possibly_identical.map { |straw| needle.similarity straw }.sort.reverse
-        
+
     if gather_last_result
       last_result.timeline << <<-EOS
 The competition was sorted in order of similarity to the needle.
 \t#{similarities[0,9].map { |s| "#{s.record2.similarity(needle).inspect}" }.join("\n\t")}
 EOS
     end
-    
+
     if is_find_all_with_score
       memo = []
       similarities.each do |similarity|
@@ -293,7 +302,7 @@ EOS
       end
       return memo
     end
-    
+
     best_similarity = similarities.first
     winner = nil
 
@@ -323,7 +332,7 @@ EOS
 
     nil # ugly
   end
-  
+
   # Explain is like mysql's EXPLAIN command. You give it a needle and it tells you about how it was located (successfully or not) in the haystack.
   #
   #     d = FuzzyMatch.new ['737', '747', '757' ]
